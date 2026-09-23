@@ -38,7 +38,8 @@ public class TmdbService {
 
         String cacheKey = title.trim().toLowerCase();
         if (posterCache.containsKey(cacheKey)) {
-            return posterCache.get(cacheKey);
+            String cached = posterCache.get(cacheKey);
+            return cached.isBlank() ? null : cached;
         }
 
         try {
@@ -78,7 +79,7 @@ public class TmdbService {
             posterCache.put(cacheKey, posterUrl);
             return posterUrl;
 
-        } catch (RestClientException | RuntimeException e) {
+        } catch (RestClientException | java.io.IOException e) {
             System.err.println("TMDB poster lookup failed for '" + title + "': " + e.getMessage());
             posterCache.put(cacheKey, "");
             return null;
