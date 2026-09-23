@@ -79,7 +79,7 @@ public class TmdbService {
             posterCache.put(cacheKey, posterUrl);
             return posterUrl;
 
-        } catch (RestClientException | java.io.IOException e) {
+        } catch (RestClientException e) {
             System.err.println("TMDB poster lookup failed for '" + title + "': " + e.getMessage());
             posterCache.put(cacheKey, "");
             return null;
