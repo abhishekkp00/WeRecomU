@@ -13,4 +13,5 @@ public class MovieMatch {
     private String title;
     private String description;
     private double match;
+    private String posterUrl;
 }
