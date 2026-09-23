@@ -1,10 +1,8 @@
 package com.abhishek.WeRecomU;
 
-import com.abhishek.WeRecomU.model.MovieMatch;
-import tools.jackson.core.type.TypeReference;
-import tools.jackson.databind.json.JsonMapper;
 import com.abhishek.WeRecomU.model.Movie;
 import com.abhishek.WeRecomU.model.MovieData;
+import com.abhishek.WeRecomU.model.MovieMatch;
 import jakarta.annotation.PostConstruct;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.core.io.ClassPathResource;
@@ -15,7 +13,6 @@ import tools.jackson.databind.json.JsonMapper;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -24,67 +21,61 @@ public class MovieService {
 
     private final EmbeddingModel embeddingModel;
     private final JsonMapper jsonMapper;
+    private final TmdbService tmdbService;
 
     private final List<Movie> moviesEmbedding = new ArrayList<>();
 
-    public MovieService(EmbeddingModel embeddingModel, JsonMapper jsonMapper) {
+    public MovieService(
+            EmbeddingModel embeddingModel,
+            JsonMapper jsonMapper,
+            TmdbService tmdbService) {
         this.embeddingModel = embeddingModel;
         this.jsonMapper = jsonMapper;
+        this.tmdbService = tmdbService;
     }
 
     @PostConstruct
     public void initializeMovies() throws IOException {
+        ClassPathResource resource = new ClassPathResource("movies.json");
 
-        ClassPathResource resource =
-                new ClassPathResource("movies.json");
-
-        InputStream inputStream =
-                resource.getInputStream();
-
-        List<MovieData> movieDataList = jsonMapper.readValue(
-                inputStream, new TypeReference<>() {});
-
-        for (MovieData movieData : movieDataList) {
-            float[] embedding = embeddingModel.embed(
-                    movieData.getDescription());
-
-            Movie movie = new Movie(
-                    movieData.getTitle(),
-                    movieData.getDescription(),
-                    embedding
+        try (InputStream inputStream = resource.getInputStream()) {
+            List<MovieData> movieDataList = jsonMapper.readValue(
+                    inputStream,
+                    new TypeReference<>() {}
             );
 
-            moviesEmbedding.add(movie);
+            for (MovieData movieData : movieDataList) {
+                float[] embedding = embeddingModel.embed(movieData.getDescription());
+
+                moviesEmbedding.add(new Movie(
+                        movieData.getTitle(),
+                        movieData.getDescription(),
+                        embedding
+                ));
+            }
         }
-        inputStream.close();
 
-        System.out.println(
-                moviesEmbedding.size() + " movies loaded with embeddings."
-        );
-
-        for(Movie movie : moviesEmbedding) {
-            System.out.println(Arrays.toString(movie.getEmbedding()));
-        }
-
+        System.out.println(moviesEmbedding.size() + " movies loaded with embeddings.");
     }
 
     public List<MovieMatch> search(String query) {
         float[] userQueryEmbedding = embeddingModel.embed(query);
-
         List<MovieMatch> matches = new ArrayList<>();
 
-        for(Movie movie : moviesEmbedding) {
-            double similarity = cosineSimilarity(userQueryEmbedding, movie.getEmbedding());
+        for (Movie movie : moviesEmbedding) {
+            double similarity = cosineSimilarity(
+                    userQueryEmbedding,
+                    movie.getEmbedding());
 
-            MovieMatch match =
-                    new MovieMatch(movie.getTitle(), movie.getDescription(), similarity);
-
-            matches.add(match);
+            matches.add(new MovieMatch(
+                    movie.getTitle(),
+                    movie.getDescription(),
+                    similarity,
+                    null));
         }
 
         sortBySimilarity(matches);
-
-        return topKMatches(matches, 3);
+        return enrichPosters(topKMatches(matches, 3));
     }
 
     public List<MovieMatch> similarMovies(String title) {
@@ -100,15 +91,22 @@ public class MovieService {
                     selectedMovie.getEmbedding(),
                     movie.getEmbedding());
 
-            MovieMatch match = new MovieMatch(
+            matches.add(new MovieMatch(
                     movie.getTitle(),
                     movie.getDescription(),
-                    similarity);
-
-            matches.add(match);
+                    similarity,
+                    null));
         }
+
         sortBySimilarity(matches);
-        return topKMatches(matches, 3);
+        return enrichPosters(topKMatches(matches, 3));
+    }
+
+    private List<MovieMatch> enrichPosters(List<MovieMatch> matches) {
+        for (MovieMatch match : matches) {
+            match.setPosterUrl(tmdbService.getPosterUrl(match.getTitle()));
+        }
+        return matches;
     }
 
     private Movie findMovie(String title) {
@@ -118,9 +116,7 @@ public class MovieService {
             }
         }
 
-        throw new IllegalArgumentException(
-                "Movie not found: " + title
-        );
+        throw new IllegalArgumentException("Movie not found: " + title);
     }
 
     private double cosineSimilarity(float[] a, float[] b) {
@@ -129,9 +125,9 @@ public class MovieService {
         double normB = 0.0;
 
         for (int i = 0; i < a.length; i++) {
-            dotProduct += (a[i] * b[i]);
-            normA += (a[i] * a[i]);
-            normB += (b[i] * b[i]);
+            dotProduct += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
         }
 
         if (normA == 0 || normB == 0) {
@@ -149,11 +145,8 @@ public class MovieService {
         );
     }
 
-    private List<MovieMatch> topKMatches(
-            List<MovieMatch> matches, int limit) {
-
+    private List<MovieMatch> topKMatches(List<MovieMatch> matches, int limit) {
         List<MovieMatch> topMatches = new ArrayList<>();
-
         int numberOfMatches = Math.min(limit, matches.size());
 
         for (int i = 0; i < numberOfMatches; i++) {
